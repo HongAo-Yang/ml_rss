@@ -1,3 +1,8 @@
 debug.log
 .vscode
 __pycache__
+scaled_dimer.extxyz
+tmp*
+*log
+*.extxyz
+VASP_inputs_*
