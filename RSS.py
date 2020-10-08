@@ -109,6 +109,50 @@ def VASP_generate_setup_file(input_dir_name,
     print("[log] Finished VASP_generate_setup_file")
 
 
+def LAMMPS_generate_data_file_single(args):
+    '''
+    args: dict{'input_dir_name', 'output_dir_name', 'i', 'at'}
+    this method should only be called by LAMMPS_generate_data_file
+    '''
+    input_dir_name = args['input_dir_name']
+    output_dir_name = args['output_dir_name']
+    i = args['i']
+    at = args['at']
+    config_dir_name = os.path.join(output_dir_name, "config_%d" % (i))
+    if not os.path.isdir(config_dir_name):
+        os.mkdir(config_dir_name)
+    cell = at.get_cell()
+    if np.dot(np.cross(cell[0, :], cell[1, :]), cell[2, :]) < 0.0:
+        t = cell[0, :].copy()
+        cell[0, :] = cell[1, :]
+        cell[1, :] = t
+        at.set_cell(cell, False)
+    ase.io.write(os.path.join(config_dir_name, "pos.data"),
+                 at, format="lammps-data")
+    os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
+
+
+def LAMMPS_generate_data_file(input_dir_name,
+                              input_file_name,
+                              output_dir_name,
+                              num_process):
+    print("[log] Running LAMMPS_generate_data_file")
+    if not os.path.isdir(input_dir_name):
+        raise RuntimeError('input dir %s does not exist' %
+                           (input_dir_name))
+    if not os.path.isdir(output_dir_name):
+        os.mkdir(output_dir_name)
+    ats = ase.io.read(input_file_name, ":")
+    args = [{'input_dir_name': input_dir_name,
+             'output_dir_name': output_dir_name,
+             'i': i,
+             'at': at}
+            for (i, at) in enumerate(ats)]
+    pool = multiprocessing.Pool(num_process)
+    pool.map(LAMMPS_generate_data_file_single, args)
+    print("[log] Finished LAMMPS_generate_data_file")
+
+
 def create_airss_single(args):
     '''
     args: dict{'i', 'input_file_name', 'remove_tmp_files'}
@@ -230,43 +274,3 @@ def select_by_descriptor(input_file_name,
         del at.info["descriptor_vec"]
     ase.io.write(output_file_name, selected_ats)
     print("[log] Finished select_by_descriptor")
-
-
-if __name__ == "__main__":
-    num_process = 8
-    my_timer = timer()
-    my_timer.start()
-
-    scale_dimer(atomic_num=[31, 8],
-                box_len=20,
-                dimer_min=1,
-                dimer_max=5,
-                dimer_steps=40,
-                output_file_name="scaled_dimer.extxyz"
-                )
-    my_timer.barrier()
-
-    create_airss(input_file_name='Ga2O3.cell',
-                 struct_number=100,
-                 output_file_name='random_structs.group_0.extxyz',
-                 num_process=num_process)
-    my_timer.barrier()
-
-    calculate_descriptor_vec(input_file_name='random_structs.group_0.extxyz',
-                             selection_descriptor='soap l_max=12 n_max=12 atom_sigma=0.5 cutoff=10',
-                             output_file_name='descriptor_vec.random_structs.group_0.extxyz',
-                             num_process=num_process)
-    my_timer.barrier()
-
-    select_by_descriptor(input_file_name='descriptor_vec.random_structs.group_0.extxyz',
-                         random_struct_num=20,
-                         selection_method="CUR",
-                         method_kwargs={'kernel_exp': 4},
-                         output_file_name="selected_by_desc.random_structs.group_0.extxyz")
-    my_timer.barrier()
-
-    VASP_generate_setup_file(input_dir_name="VASP_inputs",
-                             input_file_name="selected_by_desc.random_structs.group_0.extxyz",
-                             output_dir_name="VASP_inputs_selected",
-                             num_process=num_process)
-    my_timer.barrier()

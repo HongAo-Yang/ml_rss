@@ -6,3 +6,4 @@ tmp*
 *log
 *.extxyz
 VASP_inputs_*
+LAMMPS_inputs_*
