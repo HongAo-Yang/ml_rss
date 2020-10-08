@@ -13,6 +13,6 @@
 ##SPECIES=Ga,O
 #SLACK=0.25
 #OVERLAP=0.1
-#MINSEP=1.0 Ga-Ga=2.0 O-O=1.0 Ga-O=1.5 Ga-C=1.5
+#MINSEP=1.0 Ga-Ga=2.0 O-O=1.5 Ga-O=1.5
 
 FIX_ALL_CELL : true
