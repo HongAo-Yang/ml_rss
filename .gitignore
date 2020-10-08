@@ -7,3 +7,4 @@ tmp*
 *.extxyz
 VASP_inputs_*
 LAMMPS_inputs_*
+LAMMPS_potential
