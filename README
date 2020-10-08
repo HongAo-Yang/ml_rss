@@ -1,4 +1,4 @@
-main1.py 生成初始结构并用CUR挑选
-main2.py 生成lammps输入文件
-run_lammps.sh 运行所有lammps输入文件
+main1.py 生成初始结构并用CUR挑选，可以并行
+main2.py 生成lammps输入文件，可以并行
+run_lammps.sh 运行所有lammps输入文件，需要指定核数和lammps路径
 clean.sh 清除所有生成的文件
