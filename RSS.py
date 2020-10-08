@@ -21,10 +21,10 @@ class timer:
             self.start()
         time_now = time.time()
         if self.last_barrier == None:
-            print('[log] Cost time %f' % (time_now-self.start_time))
+            print('[timer] Cost time %f' % (time_now-self.start_time))
         else:
-            print('[log] Cost time %f' % (time_now-self.last_barrier))
-        print('[log] Total time %f' % (time_now-self.start_time))
+            print('[timer] Cost time %f' % (time_now-self.last_barrier))
+        print('[timer] Total time %f' % (time_now-self.start_time))
         self.last_barrier = time_now
 
 
