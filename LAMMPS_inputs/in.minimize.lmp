@@ -14,5 +14,7 @@ pair_style       quip
 pair_coeff       * * ../../LAMMPS_potential/gap_file.xml "Potential xml_label=GAP_2020_10_7_0_15_16_39_727" 31 8
 
 ### minimize
-minimize        1.0e-4 1.0e-6 100 1000
+thermo          10   
+dump            1 all atom 1 dump.lammpstrj 
+minimize        1.0e-4 1.0e-6 1000 10000
 write_data      minimized.data

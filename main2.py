@@ -6,7 +6,7 @@ if __name__ == "__main__":
     my_timer.start()
 
     create_airss(input_file_name='Ga2O3.cell',
-                 struct_number=100,
+                 struct_number=500,
                  output_file_name='random_structs.group_0.extxyz',
                  num_process=num_process)
     my_timer.barrier()
