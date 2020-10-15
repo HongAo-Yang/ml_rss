@@ -4,6 +4,7 @@ __pycache__
 scaled_dimer.extxyz
 tmp*
 *log
+*.err
 *.extxyz
 VASP_inputs_*
 LAMMPS_inputs_*
