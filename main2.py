@@ -24,7 +24,7 @@ if __name__ == "__main__":
                         stress_tol=0.01,
                         config_min=0,
                         config_num=30,
-                        num_process=6)
+                        num_process=num_process)
     my_timer.barrier()
 
     os.system("cat RSS_results.out.*_*.extxyz > RSS_results.extxyz")
