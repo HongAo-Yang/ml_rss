@@ -27,10 +27,10 @@ class timer:
             self.start()
         time_now = time.time()
         if self.last_barrier == None:
-            print('[timer] Cost time %f' % (time_now-self.start_time))
+            print('[timer] Cost time %f' % (time_now - self.start_time))
         else:
-            print('[timer] Cost time %f' % (time_now-self.last_barrier))
-        print('[timer] Total time %f' % (time_now-self.start_time))
+            print('[timer] Cost time %f' % (time_now - self.last_barrier))
+        print('[timer] Total time %f' % (time_now - self.start_time))
         self.last_barrier = time_now
 
 
@@ -54,8 +54,8 @@ def scale_dimer(atomic_num,
                 dimer.info['config_type'] = 'dimer'
                 dimer.info['gap_rss_nonperiodic'] = True
                 for s_i in range(dimer_steps + 1):
-                    s = dimer_min+(dimer_max-dimer_min) * \
-                        float(s_i)/float(dimer_steps)
+                    s = dimer_min + (dimer_max - dimer_min) * \
+                        float(s_i) / float(dimer_steps)
                     dimer.set_positions([[0.0, 0.0, 0.0],
                                          [s, 0.0, 0.0]])
                     ase.io.write(f, dimer, format="extxyz")
@@ -87,10 +87,10 @@ def _VASP_generate_setup_file_single(args):
     sorted_p = sorted_at.get_positions()
     order = []
     for j in range(len(at)):
-        order.append(np.argmin([np.sum((x-p[j])**2)
+        order.append(np.argmin([np.sum((x - p[j]) ** 2)
                                 for x in sorted_p]))
     with open(os.path.join(config_dir_name, "ASE_VASP_ORDER"), "w") as forder:
-        forder.writelines([str(x)+"\n" for x in order])
+        forder.writelines([str(x) + "\n" for x in order])
     os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
 
 
@@ -167,7 +167,7 @@ def _create_airss_single(args):
     i = args['i']
     input_file_name = args['input_file_name']
     remove_tmp_files = args['remove_tmp_files']
-    tmp_file_name = "tmp."+str(i)+'.'+input_file_name
+    tmp_file_name = "tmp." + str(i) + '.' + input_file_name
     run("./buildcell",
         stdin=open(input_file_name, "r"),
         stdout=open(tmp_file_name, "w"),
@@ -214,7 +214,7 @@ def _calculate_descriptor_vec_single(args):
     this method should only be called by calculate_descriptor_vec
     '''
     selection_descriptor = args['selection_descriptor']
-    desc_object = descriptors.Descriptor(selection_descriptor+" average")
+    desc_object = descriptors.Descriptor(selection_descriptor + " average")
     at = args['at']
     return desc_object.calc(at)['data']
 
@@ -242,7 +242,7 @@ def select_by_descriptor_CUR(ats,
     at_descs = np.array([at.info["descriptor_vec"] for at in ats]).T
     if kernel_exp > 0.0:
         m = np.matmul((np.squeeze(at_descs)).T,
-                      np.squeeze(at_descs))**kernel_exp
+                      np.squeeze(at_descs)) ** kernel_exp
     else:
         m = at_descs
 
@@ -252,12 +252,14 @@ def select_by_descriptor_CUR(ats,
 
         def rmv(v):
             return np.dot(at_descs.T, v)
+
         A = LinearOperator(at_descs.shape, matvec=mv,
                            rmatvec=rmv, matmat=mv)
         return svds(A, k=num, return_singular_vectors=do_vectors)
+
     (_, _, vt) = descriptor_svd(
-        m, min(max(1, int(random_struct_num/2)), min(m.shape)-1))
-    c_scores = np.sum(vt**2, axis=0)/vt.shape[0]
+        m, min(max(1, int(random_struct_num / 2)), min(m.shape) - 1))
+    c_scores = np.sum(vt ** 2, axis=0) / vt.shape[0]
     if stochastic:
         selected = sorted(np.random.choice(
             range(len(ats)), size=random_struct_num, replace=False, p=c_scores))
@@ -298,7 +300,7 @@ def _minimize_structures_single(args):
     output_file_name = args['output_file_name']
     scalar_pressure = args['scalar_pressure']
     scalar_pressure_exponential_width = args['scalar_pressure_exponential_width']
-    log_file_name = output_file_name+'_'+str(atom_i)+'.log'
+    log_file_name = "RSS_tmp/"+output_file_name + '_' + str(atom_i) + '.log'
     log_file = open(log_file_name, 'w')
     sys.stdout = log_file
     sys.stderr = log_file
@@ -312,7 +314,7 @@ def _minimize_structures_single(args):
     if scalar_pressure_exponential_width > 0.0:
         scalar_pressure_tmp *= np.random.exponential(
             scalar_pressure_exponential_width)
-    atom.info["RSS_applied_pressure"] = scalar_pressure_tmp/GPa
+    atom.info["RSS_applied_pressure"] = scalar_pressure_tmp / GPa
     atom = UnitCellFilter(atom, scalar_pressure=scalar_pressure_tmp)
     optimizer = PreconLBFGS(atom, precon=Exp(3), use_armijo=True)
     traj = []
@@ -334,10 +336,11 @@ def _minimize_structures_single(args):
         traj_at.info["stress"] = - \
             Voigt_6_to_full_3x3_stress(traj_at.info["stress"])
     if write_traj:
-        traj_file_name = output_file_name+'_traj_'+str(atom_i)+'.extxyz'
+        traj_file_name = "RSS_tmp/" + output_file_name + \
+            '_traj_' + str(atom_i) + '.extxyz'
         ase.io.write(traj_file_name, traj)
     del traj[-1].info["minim_stat"]
-    traj[-1].info["config_type"] = minim_stat+"_minimum"
+    traj[-1].info["config_type"] = minim_stat + "_minimum"
     return traj[-1]
 
 
@@ -357,7 +360,8 @@ def minimize_structures(input_file_name,
                         write_traj=True,
                         num_process=1):
     atoms = ase.io.read(input_file_name, ":")
-
+    if not os.path.isdir("RSS_tmp"):
+        os.makedirs("RSS_tmp")
     # 如果没有指定，则默认最小化所有结构
     if config_min is None:
         config_min = 0
@@ -368,7 +372,7 @@ def minimize_structures(input_file_name,
     if config_num is None:
         config_max = len(atoms)
     else:
-        config_max = min(config_min+config_num, len(atoms))
+        config_max = min(config_min + config_num, len(atoms))
     ###
     pool = multiprocessing.Pool(num_process)
     args = [{'atom_i': atom_i,
@@ -386,6 +390,61 @@ def minimize_structures(input_file_name,
             for (atom_i, atom) in enumerate(atoms[config_min:config_max])]
 
     minima = pool.map(_minimize_structures_single, args)
-    output_file_name_full = output_file_name+'_' + \
-        str(config_min)+'_'+str(config_max)+'.extxyz'
+    output_file_name_full = output_file_name + '.out.' + \
+        str(config_min) + '_' + str(config_max) + '.extxyz'
     ase.io.write(output_file_name_full, minima)
+
+
+def select_by_flat_histo(input_file_name,
+                         minim_select_flat_histo_n,
+                         kT,
+                         output_file_name):
+    enthalpies = []
+    avail_configs = []
+    ats = ase.io.read(input_file_name, ":")
+    for at in ats:
+        if at.info["config_type"] != "failed_minimum":
+            enthalpy = (at.get_potential_energy() + at.get_volume()
+                        * at.info["RSS_applied_pressure"] * GPa) / len(at)
+            enthalpies.append(enthalpy)
+            avail_configs.append(at)
+            # compute desired probabilities for flattened histogram
+    min_H = np.min(enthalpies)
+    config_prob = []
+    histo = np.histogram(enthalpies)
+    for H in enthalpies:
+        bin_i = np.searchsorted(histo[1][1:], H, side='right')
+        if bin_i == len(histo[1][1:]):
+            bin_i = bin_i - 1
+        if histo[0][bin_i] > 0.0:
+            p = 1.0 / histo[0][bin_i]
+        else:
+            p = 0.0
+        if kT > 0.0:
+            p *= np.exp(-(H - min_H) / kT)
+        config_prob.append(p)
+
+    selected_ats = []
+    for _ in range(minim_select_flat_histo_n):
+        config_prob = np.array(config_prob)
+        config_prob /= np.sum(config_prob)
+        cumul_prob = np.cumsum(config_prob)  # cumulate prob
+        rv = np.random.uniform()
+        config_i = np.searchsorted(cumul_prob, rv)
+        selected_ats.append(avail_configs[config_i])
+        # remove from config_prob by converting to list
+        config_prob = list(config_prob)
+        del config_prob[config_i]
+        # remove from other lists
+        del avail_configs[config_i]
+        del enthalpies[config_i]
+    ase.io.write(output_file_name, selected_ats)
+
+
+def select_traj_of_minima(outfile, infiles):
+    with open(outfile, "w") as fout:
+        for f in infiles:
+            for at in ase.io.read(f, ":"):
+                traj = ase.io.read('RSS_tmp/RSS_results_traj_{}.extxyz'.format(
+                    at.info['unique_starting_index']), ":")
+                ase.io.write(fout, traj, format="extxyz")
