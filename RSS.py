@@ -350,8 +350,6 @@ def minimize_structures(input_file_name,
         log_file_name = "RSS_tmp/"+output_file_name + \
             '_' + str(unique_starting_index) + '.log'
         log_file = open(log_file_name, 'w')
-        sys.stdout = log_file
-        sys.stderr = log_file
         atom.set_calculator(calculator)
         scalar_pressure_tmp = scalar_pressure * GPa
         if scalar_pressure_exponential_width > 0.0:
@@ -359,7 +357,11 @@ def minimize_structures(input_file_name,
                 scalar_pressure_exponential_width)
         atom.info["RSS_applied_pressure"] = scalar_pressure_tmp / GPa
         atom = UnitCellFilter(atom, scalar_pressure=scalar_pressure_tmp)
-        optimizer = PreconLBFGS(atom, precon=Exp(3), use_armijo=True)
+        optimizer = PreconLBFGS(atom,
+                                precon=Exp(3),
+                                use_armijo=True,
+                                logfile=log_file,
+                                master=True)
         traj = []
 
         def build_traj():
@@ -385,8 +387,6 @@ def minimize_structures(input_file_name,
         del traj[-1].info["minim_stat"]
         traj[-1].info["config_type"] = minim_stat + "_minimum"
         minima_local.append(traj[-1])
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
     comm.barrier()
     minima_group = comm.gather(minima_local, root=0)
     if rank == 0:
