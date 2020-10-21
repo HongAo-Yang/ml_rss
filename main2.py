@@ -6,12 +6,12 @@ if __name__ == "__main__":
     my_timer = timer()
     my_timer.start()
 
-    create_airss(input_file_name='Ga2O3.cell',
-                 struct_number=100,
-                 output_file_name='random_structs.extxyz',
-                 remove_tmp_files=True,
-                 num_process=num_process)
-    my_timer.barrier()
+    # create_airss(input_file_name='Ga2O3.cell',
+    #              struct_number=100,
+    #              output_file_name='random_structs.extxyz',
+    #              remove_tmp_files=True,
+    #              num_process=num_process)
+    # my_timer.barrier()
 
     minimize_structures(input_file_name='random_structs.extxyz',
                         output_file_name='RSS_results',
@@ -23,8 +23,8 @@ if __name__ == "__main__":
                         force_tol=0.01,
                         stress_tol=0.01,
                         config_min=0,
-                        config_num=30,
-                        num_process=num_process)
+                        config_num=5,
+                        )
     my_timer.barrier()
 
     # os.system("cat RSS_results.out.*_*.extxyz > RSS_results.extxyz")

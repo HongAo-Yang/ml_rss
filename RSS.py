@@ -12,10 +12,12 @@ from ase.units import GPa
 from subprocess import run
 from quippy import descriptors
 from scipy.sparse.linalg import LinearOperator, svds
+from mpi4py import MPI
 
 
 class timer:
     def __init__(self) -> None:
+        self.me = MPI.COMM_WORLD.Get_rank()
         self.start_time = None
         self.last_barrier = None
 
@@ -27,10 +29,13 @@ class timer:
             self.start()
         time_now = time.time()
         if self.last_barrier == None:
-            print('[timer] Cost time %f' % (time_now - self.start_time))
+            if self.me == 0:
+                print('[timer] Cost time %f' % (time_now - self.start_time))
         else:
-            print('[timer] Cost time %f' % (time_now - self.last_barrier))
-        print('[timer] Total time %f' % (time_now - self.start_time))
+            if self.me == 0:
+                print('[timer] Cost time %f' % (time_now - self.last_barrier))
+        if self.me == 0:
+            print('[timer] Total time %f' % (time_now - self.start_time))
         self.last_barrier = time_now
 
 
@@ -288,62 +293,6 @@ def select_by_descriptor(input_file_name,
     print("[log] Finished select_by_descriptor")
 
 
-def _minimize_structures_single(args):
-    atom_i = args['atom_i']
-    atom = args['atom']
-    GAP_control = args['GAP_control']
-    GAP_label = args['GAP_label']
-    max_steps = args['max_steps']
-    force_tol = args['force_tol']
-    stress_tol = args['stress_tol']
-    write_traj = args['write_traj']
-    output_file_name = args['output_file_name']
-    scalar_pressure = args['scalar_pressure']
-    scalar_pressure_exponential_width = args['scalar_pressure_exponential_width']
-    log_file_name = "RSS_tmp/"+output_file_name + '_' + str(atom_i) + '.log'
-    log_file = open(log_file_name, 'w')
-    sys.stdout = log_file
-    sys.stderr = log_file
-
-    calculator = quippy.potential.Potential(args_str=GAP_label,
-                                            param_filename=GAP_control)
-    calculator.set_default_properties(['energy', 'free_energy', 'forces'])
-
-    atom.set_calculator(calculator)
-    scalar_pressure_tmp = scalar_pressure * GPa
-    if scalar_pressure_exponential_width > 0.0:
-        scalar_pressure_tmp *= np.random.exponential(
-            scalar_pressure_exponential_width)
-    atom.info["RSS_applied_pressure"] = scalar_pressure_tmp / GPa
-    atom = UnitCellFilter(atom, scalar_pressure=scalar_pressure_tmp)
-    optimizer = PreconLBFGS(atom, precon=Exp(3), use_armijo=True)
-    traj = []
-
-    def build_traj():
-        traj.append(atom.copy())
-
-    optimizer.attach(build_traj)
-    optimizer.run(fmax=force_tol, smax=stress_tol, steps=max_steps)
-    if optimizer.converged():
-        minim_stat = "converged"
-    else:
-        minim_stat = "unconverged"
-
-    for (traj_at_i, traj_at) in enumerate(traj):
-        traj_at.info["RSS_minim_iter"] = traj_at_i
-        traj_at.info["config_type"] = "traj"
-        traj_at.info["minim_stat"] = minim_stat
-        traj_at.info["stress"] = - \
-            Voigt_6_to_full_3x3_stress(traj_at.info["stress"])
-    if write_traj:
-        traj_file_name = "RSS_tmp/" + output_file_name + \
-            '_traj_' + str(atom_i) + '.extxyz'
-        ase.io.write(traj_file_name, traj)
-    del traj[-1].info["minim_stat"]
-    traj[-1].info["config_type"] = minim_stat + "_minimum"
-    return traj[-1]
-
-
 def minimize_structures(input_file_name,
                         output_file_name,
                         GAP_control,
@@ -358,41 +307,96 @@ def minimize_structures(input_file_name,
                         config_min=None,
                         config_num=None,
                         write_traj=True,
-                        num_process=1):
-    atoms = ase.io.read(input_file_name, ":")
-    if not os.path.isdir("RSS_tmp"):
-        os.makedirs("RSS_tmp")
-    # 如果没有指定，则默认最小化所有结构
-    if config_min is None:
-        config_min = 0
-    elif config_min < 0:
-        raise RuntimeError("[ERROR] config_min < 0")
-    elif config_min >= len(atoms):
-        raise RuntimeError("[ERROR] config_min > number of structures")
-    if config_num is None:
-        config_max = len(atoms)
-    else:
-        config_max = min(config_min + config_num, len(atoms))
-    ###
-    pool = multiprocessing.Pool(num_process)
-    args = [{'atom_i': atom_i,
-             'atom': atom,
-             'GAP_control': GAP_control,
-             'GAP_label': GAP_label,
-             'max_steps': max_steps,
-             'force_tol': force_tol,
-             'stress_tol': stress_tol,
-             'write_traj': write_traj,
-             'output_file_name': output_file_name,
-             'scalar_pressure': scalar_pressure,
-             'scalar_pressure_exponential_width': scalar_pressure_exponential_width,
-             }
-            for (atom_i, atom) in enumerate(atoms[config_min:config_max])]
+                        ):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    atoms_group = None
+    config_max = None
+    if rank == 0:
+        if not os.path.isdir("RSS_tmp"):
+            os.makedirs("RSS_tmp")
+        atoms = ase.io.read(input_file_name, ":", parallel=False)
+        # 如果没有指定，则默认最小化所有结构
+        if config_min is None:
+            config_min = 0
+        elif config_min < 0:
+            raise RuntimeError("[ERROR] config_min < 0")
+        elif config_min >= len(atoms):
+            raise RuntimeError("[ERROR] config_min > number of structures")
+        if config_num is None:
+            config_max = len(atoms)
+        else:
+            config_max = min(config_min + config_num, len(atoms))
+        ###
+        atoms = atoms[config_min:config_max]
+        size = comm.Get_size()
+        num_atom_local = len(atoms)//size
+        atoms_group = []
+        for i in range(size):
+            if num_atom_local*size+i < len(atoms):
+                index_lo = (num_atom_local+1)*i
+                index_hi = (num_atom_local+1)*(i+1)
+            else:
+                index_lo = len(atoms)-(size-i)*num_atom_local
+                index_hi = len(atoms)-(size-i-1)*num_atom_local
+            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
+    atoms_local = comm.scatter(atoms_group, root=0)
+    calculator = quippy.potential.Potential(args_str=GAP_label,
+                                            param_filename=GAP_control)
+    calculator.set_default_properties(['energy', 'free_energy', 'forces'])
+    minima_local = []
+    for atom in atoms_local:
+        unique_starting_index = atom.info['unique_starting_index']
+        log_file_name = "RSS_tmp/"+output_file_name + \
+            '_' + str(unique_starting_index) + '.log'
+        log_file = open(log_file_name, 'w')
+        sys.stdout = log_file
+        sys.stderr = log_file
+        atom.set_calculator(calculator)
+        scalar_pressure_tmp = scalar_pressure * GPa
+        if scalar_pressure_exponential_width > 0.0:
+            scalar_pressure_tmp *= np.random.exponential(
+                scalar_pressure_exponential_width)
+        atom.info["RSS_applied_pressure"] = scalar_pressure_tmp / GPa
+        atom = UnitCellFilter(atom, scalar_pressure=scalar_pressure_tmp)
+        optimizer = PreconLBFGS(atom, precon=Exp(3), use_armijo=True)
+        traj = []
 
-    minima = pool.map(_minimize_structures_single, args)
-    output_file_name_full = output_file_name + '.out.' + \
-        str(config_min) + '_' + str(config_max) + '.extxyz'
-    ase.io.write(output_file_name_full, minima)
+        def build_traj():
+            traj.append(atom.copy())
+
+        optimizer.attach(build_traj)
+        optimizer.run(fmax=force_tol, smax=stress_tol, steps=max_steps)
+        if optimizer.converged():
+            minim_stat = "converged"
+        else:
+            minim_stat = "unconverged"
+
+        for (traj_at_i, traj_at) in enumerate(traj):
+            traj_at.info["RSS_minim_iter"] = traj_at_i
+            traj_at.info["config_type"] = "traj"
+            traj_at.info["minim_stat"] = minim_stat
+            traj_at.info["stress"] = - \
+                Voigt_6_to_full_3x3_stress(traj_at.info["stress"])
+        if write_traj:
+            traj_file_name = "RSS_tmp/" + output_file_name + \
+                '_traj_' + str(unique_starting_index) + '.extxyz'
+            ase.io.write(traj_file_name, traj, parallel=False)
+        del traj[-1].info["minim_stat"]
+        traj[-1].info["config_type"] = minim_stat + "_minimum"
+        minima_local.append(traj[-1])
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    comm.barrier()
+    minima_group = comm.gather(minima_local, root=0)
+    if rank == 0:
+        minima = []
+        for i in minima_group:
+            for j in i:
+                minima.append(j)
+        output_file_name_full = output_file_name + '.out.' + \
+            str(config_min) + '_' + str(config_max) + '.extxyz'
+        ase.io.write(output_file_name_full, minima, parallel=False)
 
 
 def select_by_flat_histo(input_file_name,
