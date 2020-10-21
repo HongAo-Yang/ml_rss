@@ -164,53 +164,55 @@ def LAMMPS_generate_data_file(input_dir_name,
     print("[log] Finished LAMMPS_generate_data_file")
 
 
-def _create_airss_single(args):
-    '''
-    args: dict{'i', 'input_file_name', 'remove_tmp_files'}
-    this method should only be called by create_airss
-    '''
-    i = args['i']
-    input_file_name = args['input_file_name']
-    remove_tmp_files = args['remove_tmp_files']
-    tmp_file_name = "tmp." + str(i) + '.' + input_file_name
-    run("./buildcell",
-        stdin=open(input_file_name, "r"),
-        stdout=open(tmp_file_name, "w"),
-        timeout=10.,
-        shell=True).check_returncode()
-    at = ase.io.read(tmp_file_name)
-    at.info["config_type"] = "initial"
-    at.info["unique_starting_index"] = i
-    if "castep_labels" in at.arrays:
-        del at.arrays["castep_labels"]
-    if "initial_magmoms" in at.arrays:
-        del at.arrays["initial_magmoms"]
-    if remove_tmp_files:
-        os.remove(tmp_file_name)
-    return at
-
-
 def create_airss(input_file_name,
                  struct_number,
                  output_file_name,
-                 num_process=1,
                  remove_tmp_files=False,
                  ):
-    print("[log] Running create_airss")
-    sys.stdout = open('create_airss.log', 'w')
-    sys.stderr = open('create_airss.err', 'w')
-    output_file = open(output_file_name, 'w')
-    pool = multiprocessing.Pool(num_process)
-    args = [{'i': i,
-             'input_file_name': input_file_name,
-             'remove_tmp_files': remove_tmp_files}
-            for i in range(struct_number)]
-    ats = pool.map(_create_airss_single, args)
-    ase.io.write(output_file, ats,
-                 format="extxyz")
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-    print("[log] Finished create_airss")
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    if rank == 0:
+        print("[log] Running create_airss")
+    num_atom_local = struct_number//size
+    if num_atom_local*size+rank < struct_number:
+        index_lo = (num_atom_local+1)*rank
+        index_hi = (num_atom_local+1)*(rank+1)
+    else:
+        index_lo = struct_number-(size-rank)*num_atom_local
+        index_hi = struct_number-(size-rank-1)*num_atom_local
+    atoms_local = []
+    for i in range(index_lo, index_hi):
+        tmp_file_name = "tmp." + str(i) + '.' + input_file_name
+        run("./buildcell",
+            stdin=open(input_file_name, "r"),
+            stdout=open(tmp_file_name, "w"),
+            timeout=100.,
+            shell=True).check_returncode()
+        atom = ase.io.read(tmp_file_name, parallel=False)
+        atom.info["config_type"] = "initial"
+        atom.info["unique_starting_index"] = i
+        if "castep_labels" in atom.arrays:
+            del atom.arrays["castep_labels"]
+        if "initial_magmoms" in atom.arrays:
+            del atom.arrays["initial_magmoms"]
+        if remove_tmp_files:
+            os.remove(tmp_file_name)
+        atoms_local.append(atom)
+    comm.barrier()
+    atoms_group = comm.gather(atoms_local, root=0)
+    if rank == 0:
+        atoms = []
+        for i in atoms_group:
+            for j in i:
+                atoms.append(j)
+        output_file = open(output_file_name, 'w')
+        ase.io.write(output_file,
+                     atoms,
+                     parallel=False,
+                     format="extxyz")
+        print("[log] Finished create_airss")
+    comm.barrier()
 
 
 def _calculate_descriptor_vec_single(args):
