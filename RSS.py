@@ -1,8 +1,6 @@
 import time
 import ase.io
 import os
-import sys
-import multiprocessing
 import numpy as np
 import quippy.potential
 from matscipy.elasticity import Voigt_6_to_full_3x3_stress
@@ -45,123 +43,126 @@ def scale_dimer(atomic_num,
                 dimer_max,
                 dimer_steps,
                 output_file_name):
-    print("[log] Running scale_dimer")
-    with open(output_file_name, "w") as f:
-        for Zi in atomic_num:
-            for Zj in atomic_num:
-                if Zi < Zj:
-                    continue
-                dimer = ase.Atoms(numbers=[Zi, Zj],
-                                  cell=[[box_len, 0.0, 0.0],
-                                        [0.0, box_len, 0.0],
-                                        [0.0, 0.0, box_len]],
-                                  pbc=[True, True, True])
-                dimer.info['config_type'] = 'dimer'
-                dimer.info['gap_rss_nonperiodic'] = True
-                for s_i in range(dimer_steps + 1):
-                    s = dimer_min + (dimer_max - dimer_min) * \
-                        float(s_i) / float(dimer_steps)
-                    dimer.set_positions([[0.0, 0.0, 0.0],
-                                         [s, 0.0, 0.0]])
-                    ase.io.write(f, dimer, format="extxyz")
-    print("[log] Finished scale_dimer")
-
-
-def _VASP_generate_setup_file_single(args):
-    '''
-    args: dict{'input_dir_name', 'output_dir_name', 'i', 'at'}
-    this method should only be called by VASP_generate_setup_file
-    '''
-    input_dir_name = args['input_dir_name']
-    output_dir_name = args['output_dir_name']
-    i = args['i']
-    at = args['at']
-    config_dir_name = os.path.join(output_dir_name, "config_%d" % (i))
-    if not os.path.isdir(config_dir_name):
-        os.mkdir(config_dir_name)
-    cell = at.get_cell()
-    if np.dot(np.cross(cell[0, :], cell[1, :]), cell[2, :]) < 0.0:
-        t = cell[0, :].copy()
-        cell[0, :] = cell[1, :]
-        cell[1, :] = t
-        at.set_cell(cell, False)
-    ase.io.write(os.path.join(config_dir_name, "POSCAR"),
-                 at, format="vasp", vasp5=True, sort=True)
-    sorted_at = ase.io.read(os.path.join(config_dir_name, "POSCAR"))
-    p = at.get_positions()
-    sorted_p = sorted_at.get_positions()
-    order = []
-    for j in range(len(at)):
-        order.append(np.argmin([np.sum((x - p[j]) ** 2)
-                                for x in sorted_p]))
-    with open(os.path.join(config_dir_name, "ASE_VASP_ORDER"), "w") as forder:
-        forder.writelines([str(x) + "\n" for x in order])
-    os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        print("[log] Running scale_dimer")
+        with open(output_file_name, "w") as f:
+            for Zi in atomic_num:
+                for Zj in atomic_num:
+                    if Zi < Zj:
+                        continue
+                    dimer = ase.Atoms(numbers=[Zi, Zj],
+                                      cell=[[box_len, 0.0, 0.0],
+                                            [0.0, box_len, 0.0],
+                                            [0.0, 0.0, box_len]],
+                                      pbc=[True, True, True])
+                    dimer.info['config_type'] = 'dimer'
+                    dimer.info['gap_rss_nonperiodic'] = True
+                    for s_i in range(dimer_steps + 1):
+                        s = dimer_min + (dimer_max - dimer_min) * \
+                            float(s_i) / float(dimer_steps)
+                        dimer.set_positions([[0.0, 0.0, 0.0],
+                                             [s, 0.0, 0.0]])
+                        ase.io.write(f, dimer, format="extxyz", parallel=False)
+        print("[log] Finished scale_dimer")
 
 
 def VASP_generate_setup_file(input_dir_name,
                              input_file_name,
-                             output_dir_name,
-                             num_process=1):
-    print("[log] Running VASP_generate_setup_file")
-    if not os.path.isdir(input_dir_name):
-        raise RuntimeError('input dir %s does not exist' %
-                           (input_dir_name))
-    if not os.path.isdir(output_dir_name):
-        os.mkdir(output_dir_name)
-    ats = ase.io.read(input_file_name, ":")
-    args = [{'input_dir_name': input_dir_name,
-             'output_dir_name': output_dir_name,
-             'i': i,
-             'at': at}
-            for (i, at) in enumerate(ats)]
-    pool = multiprocessing.Pool(num_process)
-    pool.map(_VASP_generate_setup_file_single, args)
-    print("[log] Finished VASP_generate_setup_file")
+                             output_dir_name):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    atoms_group = None
+    if rank == 0:
+        print("[log] Running VASP_generate_setup_file")
+        if not os.path.isdir(input_dir_name):
+            raise RuntimeError('input dir %s does not exist' %
+                               (input_dir_name))
+        if not os.path.isdir(output_dir_name):
+            os.mkdir(output_dir_name)
+        atoms = ase.io.read(input_file_name, ":", parallel=False)
+        size = comm.Get_size()
+        num_atom_local = len(atoms)//size
+        atoms_group = []
+        for i in range(size):
+            if num_atom_local*size+i < len(atoms):
+                index_lo = (num_atom_local+1)*i
+                index_hi = (num_atom_local+1)*(i+1)
+            else:
+                index_lo = len(atoms)-(size-i)*num_atom_local
+                index_hi = len(atoms)-(size-i-1)*num_atom_local
+            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
+    atoms_local = comm.scatter(atoms_group, root=0)
+    for atom in atoms_local:
+        unique_starting_index = atom.info['unique_starting_index']
+        config_dir_name = os.path.join(
+            output_dir_name, "config_%d" % (unique_starting_index))
+        if not os.path.isdir(config_dir_name):
+            os.mkdir(config_dir_name)
+        cell = atom.get_cell()
+        if np.dot(np.cross(cell[0, :], cell[1, :]), cell[2, :]) < 0.0:
+            t = cell[0, :].copy()
+            cell[0, :] = cell[1, :]
+            cell[1, :] = t
+            atom.set_cell(cell, False)
+        ase.io.write(os.path.join(config_dir_name, "POSCAR"),
+                     atom, format="vasp", vasp5=True, sort=True)
+        sorted_at = ase.io.read(os.path.join(config_dir_name, "POSCAR"))
+        p = atom.get_positions()
+        sorted_p = sorted_at.get_positions()
+        order = []
+        for j in range(len(atom)):
+            order.append(np.argmin([np.sum((x - p[j]) ** 2)
+                                    for x in sorted_p]))
+        with open(os.path.join(config_dir_name, "ASE_VASP_ORDER"), "w") as forder:
+            forder.writelines([str(x) + "\n" for x in order])
+        os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
+    if rank == 0:
+        print("[log] Finished VASP_generate_setup_file")
 
 
-def _LAMMPS_generate_data_file_single(args):
-    '''
-    args: dict{'input_dir_name', 'output_dir_name', 'i', 'at'}
-    this method should only be called by LAMMPS_generate_data_file
-    '''
-    input_dir_name = args['input_dir_name']
-    output_dir_name = args['output_dir_name']
-    i = args['i']
-    at = args['at']
-    config_dir_name = os.path.join(output_dir_name, "config_%d" % (i))
-    if not os.path.isdir(config_dir_name):
-        os.mkdir(config_dir_name)
-    cell = at.get_cell()
-    if np.dot(np.cross(cell[0, :], cell[1, :]), cell[2, :]) < 0.0:
-        t = cell[0, :].copy()
-        cell[0, :] = cell[1, :]
-        cell[1, :] = t
-        at.set_cell(cell, False)
-    ase.io.write(os.path.join(config_dir_name, "pos.data"),
-                 at, format="lammps-data")
-    os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
-
-
-def LAMMPS_generate_data_file(input_dir_name,
-                              input_file_name,
-                              output_dir_name,
-                              num_process=1):
-    print("[log] Running LAMMPS_generate_data_file")
-    if not os.path.isdir(input_dir_name):
-        raise RuntimeError('input dir %s does not exist' %
-                           (input_dir_name))
-    if not os.path.isdir(output_dir_name):
-        os.mkdir(output_dir_name)
-    ats = ase.io.read(input_file_name, ":")
-    args = [{'input_dir_name': input_dir_name,
-             'output_dir_name': output_dir_name,
-             'i': i,
-             'at': at}
-            for (i, at) in enumerate(ats)]
-    pool = multiprocessing.Pool(num_process)
-    pool.map(_LAMMPS_generate_data_file_single, args)
-    print("[log] Finished LAMMPS_generate_data_file")
+def LAMMPS_generate_setup_file(input_dir_name,
+                               input_file_name,
+                               output_dir_name):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    atoms_group = None
+    if rank == 0:
+        print("[log] Running LAMMPS_generate_setup_file")
+        if not os.path.isdir(input_dir_name):
+            raise RuntimeError('input dir %s does not exist' %
+                               (input_dir_name))
+        if not os.path.isdir(output_dir_name):
+            os.mkdir(output_dir_name)
+        atoms = ase.io.read(input_file_name, ":", parallel=False)
+        size = comm.Get_size()
+        num_atom_local = len(atoms)//size
+        atoms_group = []
+        for i in range(size):
+            if num_atom_local*size+i < len(atoms):
+                index_lo = (num_atom_local+1)*i
+                index_hi = (num_atom_local+1)*(i+1)
+            else:
+                index_lo = len(atoms)-(size-i)*num_atom_local
+                index_hi = len(atoms)-(size-i-1)*num_atom_local
+            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
+    atoms_local = comm.scatter(atoms_group, root=0)
+    for atom in atoms_local:
+        unique_starting_index = atom.info['unique_starting_index']
+        config_dir_name = os.path.join(
+            output_dir_name, "config_%d" % (unique_starting_index))
+        if not os.path.isdir(config_dir_name):
+            os.mkdir(config_dir_name)
+        cell = atom.get_cell()
+        if np.dot(np.cross(cell[0, :], cell[1, :]), cell[2, :]) < 0.0:
+            t = cell[0, :].copy()
+            cell[0, :] = cell[1, :]
+            cell[1, :] = t
+            atom.set_cell(cell, False)
+        ase.io.write(os.path.join(config_dir_name, "pos.data"),
+                     atom, format="lammps-data")
+        os.system("cp {}/* {}".format(input_dir_name, config_dir_name))
+    if rank == 0:
+        print("[log] Finished LAMMPS_generate_setup_file")
 
 
 def create_airss(input_file_name,
@@ -215,31 +216,38 @@ def create_airss(input_file_name,
     comm.barrier()
 
 
-def _calculate_descriptor_vec_single(args):
-    '''
-    args: dict{'selection_descriptor', selection_descriptor}
-    this method should only be called by calculate_descriptor_vec
-    '''
-    selection_descriptor = args['selection_descriptor']
-    desc_object = descriptors.Descriptor(selection_descriptor + " average")
-    at = args['at']
-    return desc_object.calc(at)['data']
-
-
 def calculate_descriptor_vec(input_file_name,
                              selection_descriptor,
-                             output_file_name,
-                             num_process=1):
-    print("[log] Running calculate_descriptor_vec")
-    ats = ase.io.read(input_file_name, ':')
-    pool = multiprocessing.Pool(num_process)
-    args = [{'selection_descriptor': selection_descriptor, 'at': at}
-            for at in ats]
-    descs_data = pool.map(_calculate_descriptor_vec_single, args)
-    for (i, desc_data) in enumerate(descs_data):
-        ats[i].info["descriptor_vec"] = desc_data
-    ase.io.write(output_file_name, ats)
-    print("[log] Finished calculate_descriptor_vec")
+                             output_file_name):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    atoms_group = None
+    if rank == 0:
+        print("[log] Running calculate_descriptor_vec")
+        atoms = ase.io.read(input_file_name, ':', parallel=False)
+        size = comm.Get_size()
+        num_atom_local = len(atoms)//size
+        atoms_group = []
+        for i in range(size):
+            if num_atom_local*size+i < len(atoms):
+                index_lo = (num_atom_local+1)*i
+                index_hi = (num_atom_local+1)*(i+1)
+            else:
+                index_lo = len(atoms)-(size-i)*num_atom_local
+                index_hi = len(atoms)-(size-i-1)*num_atom_local
+            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
+    atoms_local = comm.scatter(atoms_group, root=0)
+    desc_object = descriptors.Descriptor(selection_descriptor + " average")
+    for atom in atoms_local:
+        atom.info["descriptor_vec"] = desc_object.calc(atom)['data']
+    atoms_group = comm.gather(atoms_local, root=0)
+    if rank == 0:
+        atoms = []
+        for i in atoms_group:
+            for j in i:
+                atoms.append(j)
+        ase.io.write(output_file_name, atoms, parallel=False)
+        print("[log] Finished calculate_descriptor_vec")
 
 
 def select_by_descriptor_CUR(ats,
@@ -280,19 +288,20 @@ def select_by_descriptor(input_file_name,
                          selection_method,
                          method_kwargs,
                          output_file_name):
-    print("[log] Running select_by_descriptor")
-    ats = ase.io.read(input_file_name, ':')
-    if selection_method == "CUR":
-        selected_ats = select_by_descriptor_CUR(ats=ats,
-                                                random_struct_num=random_struct_num,
-                                                kernel_exp=method_kwargs['kernel_exp']
-                                                )
-    else:
-        selected_ats = ats
-    for at in selected_ats:
-        del at.info["descriptor_vec"]
-    ase.io.write(output_file_name, selected_ats)
-    print("[log] Finished select_by_descriptor")
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        print("[log] Running select_by_descriptor")
+        ats = ase.io.read(input_file_name, ':', parallel=False)
+        if selection_method == "CUR":
+            selected_ats = select_by_descriptor_CUR(ats=ats,
+                                                    random_struct_num=random_struct_num,
+                                                    kernel_exp=method_kwargs['kernel_exp']
+                                                    )
+        else:
+            selected_ats = ats
+        for at in selected_ats:
+            del at.info["descriptor_vec"]
+        ase.io.write(output_file_name, selected_ats, parallel=False)
+        print("[log] Finished select_by_descriptor")
 
 
 def minimize_structures(input_file_name,
@@ -405,52 +414,54 @@ def select_by_flat_histo(input_file_name,
                          minim_select_flat_histo_n,
                          kT,
                          output_file_name):
-    enthalpies = []
-    avail_configs = []
-    ats = ase.io.read(input_file_name, ":")
-    for at in ats:
-        if at.info["config_type"] != "failed_minimum":
-            enthalpy = (at.get_potential_energy() + at.get_volume()
-                        * at.info["RSS_applied_pressure"] * GPa) / len(at)
-            enthalpies.append(enthalpy)
-            avail_configs.append(at)
-            # compute desired probabilities for flattened histogram
-    min_H = np.min(enthalpies)
-    config_prob = []
-    histo = np.histogram(enthalpies)
-    for H in enthalpies:
-        bin_i = np.searchsorted(histo[1][1:], H, side='right')
-        if bin_i == len(histo[1][1:]):
-            bin_i = bin_i - 1
-        if histo[0][bin_i] > 0.0:
-            p = 1.0 / histo[0][bin_i]
-        else:
-            p = 0.0
-        if kT > 0.0:
-            p *= np.exp(-(H - min_H) / kT)
-        config_prob.append(p)
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        enthalpies = []
+        avail_configs = []
+        ats = ase.io.read(input_file_name, ":", parallel=False)
+        for at in ats:
+            if at.info["config_type"] != "failed_minimum":
+                enthalpy = (at.get_potential_energy() + at.get_volume()
+                            * at.info["RSS_applied_pressure"] * GPa) / len(at)
+                enthalpies.append(enthalpy)
+                avail_configs.append(at)
+                # compute desired probabilities for flattened histogram
+        min_H = np.min(enthalpies)
+        config_prob = []
+        histo = np.histogram(enthalpies)
+        for H in enthalpies:
+            bin_i = np.searchsorted(histo[1][1:], H, side='right')
+            if bin_i == len(histo[1][1:]):
+                bin_i = bin_i - 1
+            if histo[0][bin_i] > 0.0:
+                p = 1.0 / histo[0][bin_i]
+            else:
+                p = 0.0
+            if kT > 0.0:
+                p *= np.exp(-(H - min_H) / kT)
+            config_prob.append(p)
 
-    selected_ats = []
-    for _ in range(minim_select_flat_histo_n):
-        config_prob = np.array(config_prob)
-        config_prob /= np.sum(config_prob)
-        cumul_prob = np.cumsum(config_prob)  # cumulate prob
-        rv = np.random.uniform()
-        config_i = np.searchsorted(cumul_prob, rv)
-        selected_ats.append(avail_configs[config_i])
-        # remove from config_prob by converting to list
-        config_prob = list(config_prob)
-        del config_prob[config_i]
-        # remove from other lists
-        del avail_configs[config_i]
-        del enthalpies[config_i]
-    ase.io.write(output_file_name, selected_ats)
+        selected_ats = []
+        for _ in range(minim_select_flat_histo_n):
+            config_prob = np.array(config_prob)
+            config_prob /= np.sum(config_prob)
+            cumul_prob = np.cumsum(config_prob)  # cumulate prob
+            rv = np.random.uniform()
+            config_i = np.searchsorted(cumul_prob, rv)
+            selected_ats.append(avail_configs[config_i])
+            # remove from config_prob by converting to list
+            config_prob = list(config_prob)
+            del config_prob[config_i]
+            # remove from other lists
+            del avail_configs[config_i]
+            del enthalpies[config_i]
+        ase.io.write(output_file_name, selected_ats, parallel=False)
 
 
 def select_traj_of_minima(outfile, infiles):
-    with open(outfile, "w") as fout:
-        for f in infiles:
-            for at in ase.io.read(f, ":"):
-                traj = ase.io.read('RSS_tmp/RSS_results_traj_{}.extxyz'.format(
-                    at.info['unique_starting_index']), ":")
-                ase.io.write(fout, traj, format="extxyz")
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        with open(outfile, "w") as fout:
+            for f in infiles:
+                for at in ase.io.read(f, ":", parallel=False):
+                    traj = ase.io.read('RSS_tmp/RSS_results_traj_{}.extxyz'.format(
+                        at.info['unique_starting_index']), ":", parallel=False)
+                    ase.io.write(fout, traj, format="extxyz", parallel=False)

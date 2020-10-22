@@ -16,14 +16,12 @@ if __name__ == "__main__":
 
     create_airss(input_file_name='Ga2O3.cell',
                  struct_number=100,
-                 output_file_name='random_structs.group_0.extxyz',
-                 num_process=num_process)
+                 output_file_name='random_structs.group_0.extxyz')
     my_timer.barrier()
 
     calculate_descriptor_vec(input_file_name='random_structs.group_0.extxyz',
                              selection_descriptor='soap l_max=12 n_max=12 atom_sigma=0.5 cutoff=10',
-                             output_file_name='descriptor_vec.random_structs.group_0.extxyz',
-                             num_process=num_process)
+                             output_file_name='descriptor_vec.random_structs.group_0.extxyz')
     my_timer.barrier()
 
     select_by_descriptor(input_file_name='descriptor_vec.random_structs.group_0.extxyz',
@@ -35,6 +33,5 @@ if __name__ == "__main__":
 
     VASP_generate_setup_file(input_dir_name="VASP_inputs",
                              input_file_name="selected_by_desc.random_structs.group_0.extxyz",
-                             output_dir_name="VASP_inputs_selected",
-                             num_process=num_process)
+                             output_dir_name="VASP_inputs_selected")
     my_timer.barrier()
