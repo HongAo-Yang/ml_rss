@@ -1,3 +1,4 @@
-main1.py 生成初始结构并用CUR挑选，可以并行
-main2.py 生成初始结构并弛豫
+main1.py 迭代0
+main2.py 迭代1
+用mpirun并行，例如：mpirun -np 8 python -m main1.py
 clean.sh 清除所有生成的文件
