@@ -2,6 +2,7 @@ import time
 import ase.io
 import os
 import numpy as np
+from numpy.lib.function_base import append
 import quippy.potential
 from matscipy.elasticity import Voigt_6_to_full_3x3_stress
 from ase.optimize.precon import PreconLBFGS, Exp
@@ -93,9 +94,13 @@ def VASP_generate_setup_file(input_dir_name,
             atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
     atoms_local = comm.scatter(atoms_group, root=0)
     for atom in atoms_local:
-        unique_starting_index = atom.info['unique_starting_index']
+        unique_name = str()
+        if 'unique_starting_index' in atom.info:
+            unique_name = unique_name+str(atom.info['unique_starting_index'])
+        if 'RSS_minim_iter' in atom.info:
+            unique_name = unique_name+'_'+str(atom.info['RSS_minim_iter'])
         config_dir_name = os.path.join(
-            output_dir_name, "config_%d" % (unique_starting_index))
+            output_dir_name, "config_%s" % (unique_name))
         if not os.path.isdir(config_dir_name):
             os.mkdir(config_dir_name)
         cell = atom.get_cell()

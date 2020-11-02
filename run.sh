@@ -1,8 +1,6 @@
 start_tm=$(date +%s%N)
 
-./clean.sh
-python3 main2.py 2>err.log
-./run_lammps.sh
+mpirun -np 8 python main2.py
 
 end_tm=$(date +%s%N)
 use_tm=$(echo $end_tm $start_tm | awk '{ print ($1 - $2) / 1000000000}')
