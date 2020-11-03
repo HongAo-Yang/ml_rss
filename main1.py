@@ -1,7 +1,6 @@
 from RSS import *
 
 if __name__ == "__main__":
-    num_process = 8
     my_timer = timer()
     my_timer.start()
 

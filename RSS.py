@@ -2,8 +2,9 @@ import time
 import ase.io
 import os
 import numpy as np
-from numpy.lib.function_base import append
 import quippy.potential
+import itertools
+from numpy.lib.function_base import append
 from matscipy.elasticity import Voigt_6_to_full_3x3_stress
 from ase.optimize.precon import PreconLBFGS, Exp
 from ase.constraints import UnitCellFilter
@@ -470,3 +471,63 @@ def select_traj_of_minima(outfile, infiles):
                     traj = ase.io.read('RSS_tmp/RSS_results_traj_{}.extxyz'.format(
                         at.info['unique_starting_index']), ":", parallel=False)
                     ase.io.write(fout, traj, format="extxyz", parallel=False)
+
+
+def filter_by_distance(input_file_name,
+                       output_file_name,
+                       chemical_symbols,
+                       distance_matrix):
+    '''
+    usage example: 
+    filter_by_distance("in.extxyz","out.extxyz",['O','Ga'],[[1.5,1.7],[1.7,2.0]])
+    '''
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    atoms_group = None
+    if rank == 0:
+        atoms = ase.io.read(input_file_name, ":", parallel=False)
+        print("[log] Running filter_by_distance")
+        print("      original struct number: %d" % (len(atoms)))
+        size = comm.Get_size()
+        num_atom_local = len(atoms)//size
+        atoms_group = []
+        for i in range(size):
+            if num_atom_local*size+i < len(atoms):
+                index_lo = (num_atom_local+1)*i
+                index_hi = (num_atom_local+1)*(i+1)
+            else:
+                index_lo = len(atoms)-(size-i)*num_atom_local
+                index_hi = len(atoms)-(size-i-1)*num_atom_local
+            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
+    atoms_local = comm.scatter(atoms_group, root=0)
+    atoms_selected_local = []
+    for atom in atoms_local:
+        selected = True
+        all_distances = atom.get_all_distances()
+        all_distances = all_distances+np.identity(len(all_distances))*100
+        all_chemical_symbols = atom.get_chemical_symbols()
+        for i, chemical_symbol_i in enumerate(chemical_symbols):
+            for j, chemical_symbol_j in enumerate(chemical_symbols):
+                if j < i:
+                    break
+                index1 = [index for index, val in enumerate(
+                    all_chemical_symbols) if val == chemical_symbol_i]
+                index2 = [index for index, val in enumerate(
+                    all_chemical_symbols) if val == chemical_symbol_j]
+                if all_distances[index1][:, index2].min() < distance_matrix[i][j]:
+                    selected = False
+                    break
+            if not selected:
+                break
+        if selected:
+            atoms_selected_local.append(atom)
+    comm.barrier()
+    atoms_selected_group = comm.gather(atoms_selected_local, root=0)
+    if rank == 0:
+        atoms_selected = []
+        for i in atoms_selected_group:
+            for j in i:
+                atoms_selected.append(j)
+        print("      now struct number: %d" % (len(atoms_selected)))
+        print("[log] Finished filter_by_distance")
+        ase.io.write(output_file_name, atoms_selected, parallel=False)
