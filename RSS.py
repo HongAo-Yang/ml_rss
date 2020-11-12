@@ -194,7 +194,6 @@ def create_airss(input_file_name,
         run("./buildcell",
             stdin=open(input_file_name, "r"),
             stdout=open(tmp_file_name, "w"),
-            timeout=100.,
             shell=True).check_returncode()
         atom = ase.io.read(tmp_file_name, parallel=False)
         atom.info["config_type"] = "initial"
