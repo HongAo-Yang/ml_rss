@@ -8,6 +8,7 @@ tmp*
 *log
 *.err
 *.extxyz
+RSS_tmp
 
 # 以下目录存放VASP、LAMMPS输入脚本等
 VASP_inputs_*
@@ -18,3 +19,7 @@ GAP_potential
 
 # buildcell 在不同的平台上可能不同
 buildcell  
+
+# not finished yet
+run.sh
+clean.sh
