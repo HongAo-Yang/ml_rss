@@ -3,7 +3,6 @@ import ase.io
 import os
 import numpy as np
 import quippy.potential
-import itertools
 from numpy.lib.function_base import append
 from matscipy.elasticity import Voigt_6_to_full_3x3_stress
 from ase.optimize.precon import PreconLBFGS, Exp
