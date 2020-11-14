@@ -3,6 +3,7 @@ import ase.io
 import os
 import numpy as np
 import quippy.potential
+import math
 from numpy.lib.function_base import append
 from matscipy.elasticity import Voigt_6_to_full_3x3_stress
 from ase.optimize.precon import PreconLBFGS, Exp
@@ -482,50 +483,71 @@ def filter_by_distance(input_file_name,
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     atoms_group = None
+    num_scatter = None
     if rank == 0:
         atoms = ase.io.read(input_file_name, ":", parallel=False)
         print("[log] Running filter_by_distance")
         print("      original struct number: %d" % (len(atoms)))
         size = comm.Get_size()
+        max_structure = 30000                     # 每次广播30000个结构
+        num_scatter = math.ceil(len(atoms)/max_structure)
         num_atom_local = len(atoms)//size
-        atoms_group = []
-        for i in range(size):
-            if num_atom_local*size+i < len(atoms):
-                index_lo = (num_atom_local+1)*i
-                index_hi = (num_atom_local+1)*(i+1)
-            else:
-                index_lo = len(atoms)-(size-i)*num_atom_local
-                index_hi = len(atoms)-(size-i-1)*num_atom_local
-            atoms_group.append([atom for atom in atoms[index_lo:index_hi]])
-    atoms_local = comm.scatter(atoms_group, root=0)
+        atoms_group = [[] for _ in range(num_scatter)]
+        for i in range(num_scatter):
+            atoms_this_scatter = atoms[i *
+                                       max_structure:min((i+1)*max_structure, len(atoms))]
+            num_atom_local = len(atoms_this_scatter)//size
+            for j in range(size):
+                if num_atom_local*size+j < len(atoms_this_scatter):
+                    index_lo = (num_atom_local+1)*j
+                    index_hi = (num_atom_local+1)*(j+1)
+                else:
+                    index_lo = len(atoms_this_scatter)-(size-j)*num_atom_local
+                    index_hi = len(atoms_this_scatter) - \
+                        (size-j-1)*num_atom_local
+                atoms_group[i].append(
+                    [atom for atom in atoms_this_scatter[index_lo:index_hi]])
+    num_scatter = comm.bcast(num_scatter, root=0)
+    atoms_local = []
+    for i in range(num_scatter):
+        tmp = None
+        if rank == 0:
+            tmp = atoms_group[i]
+        atoms_local.append(comm.scatter(tmp, root=0))
     atoms_selected_local = []
-    for atom in atoms_local:
-        selected = True
-        all_distances = atom.get_all_distances()
-        all_distances = all_distances+np.identity(len(all_distances))*100
-        all_chemical_symbols = atom.get_chemical_symbols()
-        for i, chemical_symbol_i in enumerate(chemical_symbols):
-            for j, chemical_symbol_j in enumerate(chemical_symbols):
-                if j < i:
-                    break
-                index1 = [index for index, val in enumerate(
-                    all_chemical_symbols) if val == chemical_symbol_i]
-                index2 = [index for index, val in enumerate(
-                    all_chemical_symbols) if val == chemical_symbol_j]
-                if all_distances[index1][:, index2].min() < distance_matrix[i][j]:
-                    selected = False
+    for atoms in atoms_local:
+        for atom in atoms:
+            selected = True
+            all_distances = atom.get_all_distances()
+            all_distances = all_distances+np.identity(len(all_distances))*100
+            all_chemical_symbols = atom.get_chemical_symbols()
+            for i, chemical_symbol_i in enumerate(chemical_symbols):
+                for j, chemical_symbol_j in enumerate(chemical_symbols):
+                    if j < i:
+                        break
+                    index1 = [index for index, val in enumerate(
+                        all_chemical_symbols) if val == chemical_symbol_i]
+                    index2 = [index for index, val in enumerate(
+                        all_chemical_symbols) if val == chemical_symbol_j]
+                    if all_distances[index1][:, index2].min() < distance_matrix[i][j]:
+                        selected = False
+                        break
+                if not selected:
                     break
             if not selected:
-                break
-        if selected:
-            atoms_selected_local.append(atom)
+                atoms.remove(atom)
+        atoms_selected_local.append(atoms)
     comm.barrier()
-    atoms_selected_group = comm.gather(atoms_selected_local, root=0)
+    atoms_selected_group = []
+    for i in range(num_scatter):
+        tmp = atoms_selected_local[i]
+        atoms_selected_group.append(comm.gather(tmp, root=0))
     if rank == 0:
         atoms_selected = []
         for i in atoms_selected_group:
             for j in i:
-                atoms_selected.append(j)
+                for k in j:
+                    atoms_selected.append(k)
         print("      now struct number: %d" % (len(atoms_selected)))
         print("[log] Finished filter_by_distance")
         ase.io.write(output_file_name, atoms_selected, parallel=False)
