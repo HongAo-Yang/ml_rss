@@ -516,6 +516,7 @@ def filter_by_distance(input_file_name,
         atoms_local.append(comm.scatter(tmp, root=0))
     atoms_selected_local = []
     for atoms in atoms_local:
+        atoms_selected_single = []
         for atom in atoms:
             selected = True
             all_distances = atom.get_all_distances()
@@ -534,9 +535,9 @@ def filter_by_distance(input_file_name,
                         break
                 if not selected:
                     break
-            if not selected:
-                atoms.remove(atom)
-        atoms_selected_local.append(atoms)
+            if selected:
+                atoms_selected_single.append(atom)
+        atoms_selected_local.append(atoms_selected_single)
     comm.barrier()
     atoms_selected_group = []
     for i in range(num_scatter):
