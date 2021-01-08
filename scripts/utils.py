@@ -162,7 +162,18 @@ def distance_minimum(input_file_name):
               (index, all_distances[index1][:, index2].min()))
 
 
+def filter_by_force(input_file_name,
+                    output_file_name,
+                    force_toleration):
+    atoms = ase.io.read(input_file_name, ':')
+    atoms_filtered = []
+    for atom in atoms:
+        if np.abs(atom.get_forces()).max() < force_toleration:
+            atoms_filtered.append(atom)
+    print(input_file_name, ',original structure %d, now structure %d' %
+          (len(atoms), len(atoms_filtered)))
+    ase.io.write(output_file_name, atoms_filtered, format='extxyz')
+
+
 if __name__ == "__main__":
-    # filter_by_distance_count('1.extxyz', ['O', 'Ga'], [[1.2, 1.5], [1.5, 2.0]])
-    # filter_by_distance_count('2.extxyz', ['O', 'Ga'], [[1.2, 1.5], [1.5, 2.0]])
-    distance_minimum('1.extxyz')
+    filter_by_force('in.extxyz', 'out.extxyz', 30)
