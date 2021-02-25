@@ -168,13 +168,13 @@ def VASP_generate_POSCAR_and_KPOINTS(input_dir_name,
             cell[0, :] = cell[1, :]
             cell[1, :] = t
             atom.set_cell(cell, False)
-        k1 = math.ceil(30/cell[0, 0])
-        k2 = math.ceil(30/cell[1, 1])
-        k3 = math.ceil(30/cell[2, 2])
+        k1 = math.ceil(30/cell.lengths()[0])
+        k2 = math.ceil(30/cell.lengths()[1])
+        k3 = math.ceil(30/cell.lengths()[2])
         if atom.get_atomic_numbers().size > 100:
-            k1 = math.floor(30/cell[0, 0])
-            k2 = math.floor(30/cell[1, 1])
-            k3 = math.floor(30/cell[2, 2])
+            k1 = math.floor(30/cell.lengths()[0])
+            k2 = math.floor(30/cell.lengths()[1])
+            k3 = math.floor(30/cell.lengths()[2])
         ase.io.write(os.path.join(config_dir_name, "POSCAR"),
                      atom, format="vasp", vasp5=True, sort=True)
         sorted_at = ase.io.read(os.path.join(config_dir_name, "POSCAR"))
