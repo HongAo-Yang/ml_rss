@@ -175,5 +175,36 @@ def filter_by_force(input_file_name,
     ase.io.write(output_file_name, atoms_filtered, format='extxyz')
 
 
+def filter_by_energy_error(input_file_name, output_file_name):
+    atoms = ase.io.read(input_file_name, ':')
+    energy_error = []
+    for atom in atoms:
+        energy = atom.info['energy']
+        REF_energy = atom.info['REF_energy']
+        Num_atom = atom.get_atomic_numbers().size
+        energy_error.append(abs(energy-REF_energy)/Num_atom)
+    critical_energy_error = sorted(energy_error, reverse=True)[50]
+    atoms_filtered = []
+    for (i, atom) in enumerate(atoms):
+        if energy_error[i] > critical_energy_error:
+            atoms_filtered.append(atom)
+    ase.io.write(output_file_name, atoms_filtered, format='extxyz')
+
+
+def filter_unique(input_file_name, output_file_name):
+    atoms = ase.io.read(input_file_name, ':')
+    data = []
+    for atom in atoms:
+        data.append([atom.info['unique_starting_index'],
+                     atom.info['REF_energy']])
+    data = np.array(data)
+    unique_data, index = np.unique(data, return_index=True, axis=0)
+    atoms_filtered = [atoms[i] for i in index]
+    print('original structure number: %d' % (len(atoms)))
+    print('unique structure number: %d' % (len(atoms_filtered)))
+    ase.io.write(output_file_name, atoms_filtered, format='extxyz')
+
+
 if __name__ == "__main__":
-    filter_by_force('in.extxyz', 'out.extxyz', 30)
+    filter_unique('Ga2O3_train.extxyz',
+                  'out.extxyz')
