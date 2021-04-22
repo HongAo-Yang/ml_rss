@@ -546,7 +546,7 @@ def filter_by_distance(input_file_name,
                        chemical_symbols,
                        distance_matrix):
     '''
-    usage example: 
+    usage example:
     filter_by_distance("in.extxyz","out.extxyz",['O','Ga'],[[1.5,1.7],[1.7,2.0]])
     '''
     comm = MPI.COMM_WORLD
@@ -621,3 +621,115 @@ def filter_by_distance(input_file_name,
         print("      now struct number: %d" % (len(atoms_selected)))
         print("[log] Finished filter_by_distance")
         ase.io.write(output_file_name, atoms_selected, parallel=False)
+
+
+def create_crys_amor_crys_interface(input_file_name,
+                                    interface_thickness,
+                                    number_Ga_atom,
+                                    number_O_atom
+                                    ):
+    '''
+    usage example:
+    create_crys_amor_crys_interface(input_file_name='POSCAR_GaO(20-4).cube.vasp',
+                                    interface_thickness=np.arange(10, 22, 2),
+                                    number_Ga_atom=[40],
+                                    number_O_atom=np.arange(60, 50, -2))
+    '''
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    workdir = 'crys_amor_crys_data'
+    if rank == 0:
+        print("[log] Running create_crys_amor_crys_interface")
+        if not os.path.isdir(workdir):
+            os.mkdir(workdir)
+        for i in interface_thickness:
+            atom1 = ase.io.read(input_file_name, parallel=False)
+            atom2 = ase.io.read(input_file_name, parallel=False)
+            zmin = atom1.positions[:, 2].min()
+            zmax = atom1.positions[:, 2].max()
+            beta = atom1.get_cell_lengths_and_angles()[4]
+            beta = (180-beta) * math.pi / 180
+            move_length = (zmax - zmin + i)
+            atom2.positions += (-move_length / math.tan(beta), 0, move_length)
+            interface = atom1 + atom2
+            interface.center(vacuum=0, axis=2)
+            interface.write(os.path.join(workdir, 'interface_%d.txt' % (i)),
+                            format="castep-cell",
+                            positions_frac=True, parallel=False)
+            # delete the very begining lines
+            lines = open(os.path.join(
+                workdir, 'interface_%d.txt' % (i))).readlines()
+            open(os.path.join(workdir, 'interface_%d.txt' %
+                              (i)), 'w').writelines(lines[5:])
+    comm.barrier()
+    num_job = len(interface_thickness)*len(number_Ga_atom)*len(number_O_atom)
+    num_job_local = num_job//size
+    if num_job_local*size+rank < num_job:
+        index_lo = (num_job_local+1)*rank
+        index_hi = (num_job_local+1)*(rank+1)
+    else:
+        index_lo = num_job-(size-rank)*num_job_local
+        index_hi = num_job-(size-rank-1)*num_job_local
+    print(index_lo, index_hi)
+    for index in range(index_lo, index_hi):
+        index_interface_thickness = index//(len(number_Ga_atom)
+                                            * len(number_O_atom))
+        index_Ga = (index - index_interface_thickness*len(number_Ga_atom) *
+                    len(number_O_atom))//len(number_O_atom)
+        index_O = index - index_interface_thickness*len(number_Ga_atom) * \
+            len(number_O_atom)-index_Ga*len(number_O_atom)
+        interface_thickness_local = interface_thickness[index_interface_thickness]
+        Ga_local = number_Ga_atom[index_Ga]
+        O_local = number_O_atom[index_O]
+        with open(os.path.join(workdir, 'interface_%d.txt' % (interface_thickness_local))) as txt:
+            content = txt.readlines()  # 读全部行
+        lines = np.array(content)
+        num_of_instances = lines.size  # 整个txt的行数
+        list = []
+        n_Ga = 0
+        n_O = 0
+        for i in range(0, num_of_instances):
+            if i <= 6:
+                list.append(lines[i])
+                if i == 3:
+                    list.append('#FIX\n')
+            elif lines[i][0:2] == 'Ga':
+                n_Ga += 1
+                content = lines[i].split("\n")
+                list.append(content[0] + " # Ga" + str(n_Ga) +
+                            " % POSAMP=0 NOMOVE FIX\n")
+            elif lines[i][0:2] == 'O ':
+                n_O += 1
+                content = lines[i].split("\n")
+                list.append(content[0] + " # O" + str(n_O) +
+                            " % POSAMP=0 NOMOVE FIX\n")
+            elif lines[i] == '%ENDBLOCK POSITIONS_FRAC\n':
+                n_Ga += 1
+                n_O += 1
+                content = 'Ga   0.5   0.5   0.5           '
+                list.append(content + " # Ga" + str(n_Ga) +
+                            " % NUM=" + str(Ga_local) + ' ZAMP=' + str(interface_thickness_local/2) +
+                            ' XAMP=-1 YAMP=-1\n')
+                content = 'O    0.5   0.5   0.5           '
+                list.append(content + " # Ga" + str(n_O) +
+                            " % NUM=" + str(O_local) + ' ZAMP=' + str(interface_thickness_local/2) +
+                            ' XAMP=-1 YAMP=-1\n')
+                list.append('%ENDBLOCK POSITIONS_FRAC\n\n')
+                list.append('#VARVOL=15\n')
+                list.append('#SLACK=0.15\n')
+                list.append('#OVERLAP=0.1\n')
+                list.append('#MINSEP=1.0 Ga-Ga=2.0 O-O=1.8 Ga-O=1.6\n\n')
+                list.append('FIX_ALL_CELL : true')
+        with open(os.path.join(workdir, 'Ga2O3_interface_%d.cell' % (index)), 'w') as F:
+            F.writelines(list)  # 写入到另一个txt文件中
+            F.close()
+        run("buildcell",
+            stdin=open(os.path.join(
+                workdir, 'Ga2O3_interface_%d.cell' % (index)), 'r'),
+            stdout=open(os.path.join(
+                workdir, 'Ga2O3_interface_out_%d.cell' % (index)), 'w'),
+            shell=True).check_returncode()
+    comm.barrier()
+    if rank == 0:
+        print("[log] Finished create_crys_amor_crys_interface")
