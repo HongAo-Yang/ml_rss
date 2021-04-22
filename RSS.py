@@ -624,6 +624,7 @@ def filter_by_distance(input_file_name,
 
 
 def create_crys_amor_crys_interface(input_file_name,
+                                    out_file_name,
                                     interface_thickness,
                                     number_Ga_atom,
                                     number_O_atom
@@ -671,7 +672,7 @@ def create_crys_amor_crys_interface(input_file_name,
     else:
         index_lo = num_job-(size-rank)*num_job_local
         index_hi = num_job-(size-rank-1)*num_job_local
-    print(index_lo, index_hi)
+    atoms_local = []
     for index in range(index_lo, index_hi):
         index_interface_thickness = index//(len(number_Ga_atom)
                                             * len(number_O_atom))
@@ -721,15 +722,39 @@ def create_crys_amor_crys_interface(input_file_name,
                 list.append('#OVERLAP=0.1\n')
                 list.append('#MINSEP=1.0 Ga-Ga=2.0 O-O=1.8 Ga-O=1.6\n\n')
                 list.append('FIX_ALL_CELL : true')
-        with open(os.path.join(workdir, 'Ga2O3_interface_%d.cell' % (index)), 'w') as F:
+
+        tem_file_name_in = out_file_name + '_%d.cell' % (index)
+        tem_file_name_out = out_file_name + '_out_%d.cell' % (index)
+
+        with open(os.path.join(workdir, tem_file_name_in), 'w') as F:
             F.writelines(list)  # 写入到另一个txt文件中
             F.close()
         run("buildcell",
             stdin=open(os.path.join(
-                workdir, 'Ga2O3_interface_%d.cell' % (index)), 'r'),
+                workdir, tem_file_name_in), 'r'),
             stdout=open(os.path.join(
-                workdir, 'Ga2O3_interface_out_%d.cell' % (index)), 'w'),
+                workdir, tem_file_name_out), 'w'),
             shell=True).check_returncode()
+        atom = ase.io.read(os.path.join(
+            workdir, tem_file_name_out), parallel=False)
+        atom.info["config_type"] = "initial"
+        atom.info["unique_starting_index"] = index
+        if "castep_labels" in atom.arrays:
+            del atom.arrays["castep_labels"]
+        if "initial_magmoms" in atom.arrays:
+            del atom.arrays["initial_magmoms"]
+        atoms_local.append(atom)
     comm.barrier()
+    atoms_group = comm.gather(atoms_local, root=0)
     if rank == 0:
+        atoms = []
+        for i in atoms_group:
+            for j in i:
+                atoms.append(j)
+        output_file = open(out_file_name, 'w')
+        ase.io.write(output_file,
+                     atoms,
+                     parallel=False,
+                     format="extxyz")
         print("[log] Finished create_crys_amor_crys_interface")
+    comm.barrier()
