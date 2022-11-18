@@ -1,3 +1,0 @@
-RSS.py 是主要的代码
-data 文件夹存放输入文件，包括cell文件，VASP输入文件
-scripts 文件夹存放python和shell脚本等，注意py文件中RSS模块的路径

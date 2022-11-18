@@ -1,25 +1,15 @@
-# 编辑器或IDE可能产生的文件
-debug.log
 .vscode
 __pycache__
 
-# 中间文件或临时文件
+# temporary files
 tmp*
 *log
 *.err
 *.extxyz
 RSS_tmp
 
-# 以下目录存放VASP、LAMMPS输入脚本等
-VASP_inputs_*
-LAMMPS_inputs_*
-
-# GAP_potential 目录存放训练得到的势能
+# GAP potential directory
 GAP_potential
 
-# buildcell 在不同的平台上可能不同
+# buildcell executable may differ on different platforms
 buildcell  
-
-# not finished yet
-run.sh
-clean.sh
